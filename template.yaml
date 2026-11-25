@@ -1,0 +1,124 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: PlanA Telegram bot - habits, tasks, goals and streaks
+
+# Secrets are passed as parameters at deploy time and are never stored in git.
+# NOTE: `sam deploy --guided` saves them into samconfig.toml - that file is in .gitignore.
+Parameters:
+  BotToken:
+    Type: String
+    NoEcho: true
+    Description: Telegram bot token from @BotFather
+  WebhookSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    AllowedPattern: "^[A-Za-z0-9_-]+$"
+    Description: Random string (32-256 chars, A-Z a-z 0-9 _ -) sent by Telegram in X-Telegram-Bot-Api-Secret-Token
+  OwnerChatId:
+    Type: String
+    NoEcho: true
+    AllowedPattern: "^-?[0-9]+$"
+    Description: Your Telegram chat id - the only user the bot talks to
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]
+    CodeUri: src/
+    MemorySize: 256
+    Timeout: 20
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref Table
+        BOT_TOKEN: !Ref BotToken
+        OWNER_CHAT_ID: !Ref OwnerChatId
+
+Resources:
+  Table:
+    Type: AWS::DynamoDB::Table
+    # Keep the data even if the stack is deleted.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: planabot
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  WebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: webhook_handler.lambda_handler
+      Environment:
+        Variables:
+          WEBHOOK_SECRET: !Ref WebhookSecret
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref Table
+      FunctionUrlConfig:
+        # Public URL; requests without the right secret header get 403 in code.
+        AuthType: NONE
+
+  WebhookLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${WebhookFunction}
+      RetentionInDays: 30
+
+  SchedulerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: scheduler_handler.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref Table
+      Events:
+        Morning:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(0 9 * * ? *)
+            ScheduleExpressionTimezone: Europe/Kyiv
+            Input: '{"kind": "morning"}'
+        Evening:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(0 21 * * ? *)
+            ScheduleExpressionTimezone: Europe/Kyiv
+            Input: '{"kind": "evening"}'
+        Late:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(0 23 * * ? *)
+            ScheduleExpressionTimezone: Europe/Kyiv
+            Input: '{"kind": "late"}'
+        Weekly:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(0 20 ? * SUN *)
+            ScheduleExpressionTimezone: Europe/Kyiv
+            Input: '{"kind": "weekly"}'
+
+  SchedulerLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${SchedulerFunction}
+      RetentionInDays: 30
+
+Outputs:
+  FunctionUrl:
+    Description: Base Function URL (/webhook for Telegram, /api/* reserved for the v2 Mini App)
+    Value: !GetAtt WebhookFunctionUrl.FunctionUrl
+  WebhookUrl:
+    Description: URL for Telegram setWebhook
+    Value: !Sub "${WebhookFunctionUrl.FunctionUrl}webhook"

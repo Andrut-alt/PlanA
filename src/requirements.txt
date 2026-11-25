@@ -1,0 +1,2 @@
+# IANA time zone data for zoneinfo ("Europe/Kyiv"), independent of the OS image.
+tzdata

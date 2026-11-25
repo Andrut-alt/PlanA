@@ -1,0 +1,27 @@
+# SAM build output
+.aws-sam/
+
+# Contains deploy parameters, including BotToken / WebhookSecret / OwnerChatId in plain text
+samconfig.toml
+
+# Local secrets for scripts
+.env
+.env.*
+!.env.example
+
+# Personal plan and backups (public repo: keep your real goals private)
+plan.json
+planabot-*.json
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
